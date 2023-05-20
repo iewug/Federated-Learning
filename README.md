@@ -4,7 +4,7 @@
 
 This is my PyTorch approach to simulate and implement the interactions between clients and the cloud server in horizontal Federated Learning mode to realize a simple MNIST classification. The details are listed as follows, just the same as FedAvg algorithm.
 
-- **server**: create N threads, one thread per client (condition variables are used for synchronization)
+- **server**: create N threads, one thread per client
   - randomly choose M out of N clients
   - send global weight to M clients
   - receive local weight from them
@@ -14,7 +14,7 @@ This is my PyTorch approach to simulate and implement the interactions between c
   - train the local model on its local data
   - send local weight to the server
 
-For more details, see `report.pdf`.
+Transferring large pickle files via sockets and using condition variables for synchronization are the two most difficult parts in the implementation. For more details, please refer to the code and `report.pdf`.
 
 ## 1. Install
 
@@ -77,7 +77,7 @@ The final structure should be like:
 └── utils.py
 ```
 
-## 2. Run
+## 3. Run
 
 Create N clients; M out of N clients will participate in the update
 
