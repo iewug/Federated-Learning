@@ -33,7 +33,7 @@ pip install dill
 ## 2. Dataset
 
 - Put MNIST dataset in `data/MNIST/raw` folder
-- Client dataset is pre-divided MNIST dataset, and should be put in `data/client` folder
+- Client dataset is pre-divided MNIST dataset, and should be put in `data/client` folder. You can download from https://pan.baidu.com/s/1zzVC420DMYYo_y54OTujeg?pwd=ypzz 
 
 The final structure should be like:
 
