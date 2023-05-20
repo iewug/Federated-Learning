@@ -1,3 +1,15 @@
+'''
+server.py
+create N threads, one thread per client
+partial participation mode:
+    repeat
+        - randomly choose M out of N clients
+        - send global weight to M clients (where they train with local data)
+        - receive local weight from them
+        - average the weight from N clients (N-M use old weight)
+type ctrl-c to quit
+'''
+
 import socket
 import threading
 import argparse
@@ -8,6 +20,7 @@ import copy
 import warnings
 import os
 import random
+import torchvision
 from utils import rcv_data, send_data
 
 def FedAvg(weightDict):
@@ -23,9 +36,10 @@ def FedAvg(weightDict):
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', default=0, type=int, help='which gpu')
 parser.add_argument('--IP', default=socket.gethostbyname(socket.gethostname()), type=str, help='IP addr')
-parser.add_argument('--PORT', default=12344, type=int, help='port number')
-parser.add_argument('--M', default=3, type=int, help='update number')
+parser.add_argument('--PORT', default=12345, type=int, help='port number')
+parser.add_argument('--M', default=10, type=int, help='update number')
 parser.add_argument('--epoch', default=10, type=int, help='total epochs')
+parser.add_argument('--batch-size', default=1000, type=int, help='test batch size')
 args = parser.parse_args()
 
 # global var
@@ -37,9 +51,18 @@ threadcnt = 0
 clientList = []
 sendList = []
 
+# dataset
+testset = torchvision.datasets.MNIST('./data/', train=False, download=True,
+                               transform=torchvision.transforms.Compose([
+                                   torchvision.transforms.ToTensor(),
+                                   torchvision.transforms.Normalize(
+                                       (0.1307,), (0.3081,))
+                               ]))
+testloader = torch.utils.data.DataLoader(testset,batch_size=args.batch_size, shuffle=True,num_workers=2,pin_memory=True)
+
 # condition
-lock = threading.Lock()
-cond = threading.Condition(lock)
+# lock = threading.Lock()
+cond = threading.Condition()
 sendcond = threading.Condition()
 
 # thread
@@ -52,10 +75,11 @@ def handle_client(conn, addr):
     print(f"[NEW CONNECTION] {addr} connected")
     conn.send("Greeting from Server".encode('utf-8'))
 
-    # sleep until all clients have been accepted
+    # wait until all clients have been accepted
     with cond:
         threadcnt += 1
         clientList.append(addr)
+        lnetWeightDict[addr] = glnet.state_dict()
         if threadcnt != args.N:
             cond.wait()
         else:
@@ -66,9 +90,12 @@ def handle_client(conn, addr):
             cond.notify_all()
             
     while True:
+        # wait if not chosen
         with sendcond:
             while addr not in sendList:
                 sendcond.wait()
+        
+        # send cmd
         if epoch == args.epoch:
             conn.send("LOGOUT".encode('utf-8'))
             break
@@ -87,19 +114,31 @@ def handle_client(conn, addr):
         print(f"Receive weight from {addr}")
         weights = pickle.loads(weight_bytes)
 
+        # wait if receive weight's number < M
+        # else do evaluation
         with cond:
             lnetWeightDict[addr] = weights
             updatecnt += 1
             if updatecnt != args.M:
-                #print(f"{addr} waiting...")
                 cond.wait()
             else:
                 epoch += 1
+                
+                #evaluation
                 print("Evaluation")
                 avgWeight = FedAvg(lnetWeightDict)
                 glnet.load_state_dict(avgWeight)
-                #eval...
-                # TODO
+                glnet.eval()
+                correct = 0
+                with torch.no_grad():
+                    for data, target in testloader:
+                        data = data.to(args.gpu)
+                        target = target.to(args.gpu)
+                        output = glnet(data)
+                        pred = output.max(1)[1]
+                        correct += pred.eq(target).sum().item()
+                print(f"ACC: {correct/len(testset)}")
+
                 if epoch != args.epoch:
                     updatecnt = 0
                     sendList = random.sample(clientList,args.M)
@@ -111,11 +150,10 @@ def handle_client(conn, addr):
                     sendcond.notify_all()
                 cond.notify_all()
             
-        #print(f"{addr} waking...")
-
     conn.recv(1024) # make sure client socket close first
     print(f"[DISCONNECTED] {addr} disconnected")
     conn.close()
+
 
 # create listening socket
 print("Server starting...")
@@ -146,7 +184,6 @@ try:
         conn, addr = server.accept()
         thread = threading.Thread(target=handle_client, args=(conn, addr))
         thread.start()
-        # print(f"Active connections {threading.activeCount() - 1}")
 except KeyboardInterrupt:
     print("\nServer exiting...")
 finally:
